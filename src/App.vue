@@ -15,5 +15,7 @@ export default {
 </script>
 //这里用land="less"
 <style lang="less" scoped>
-
+  #app{
+    height: 100%;
+  }
 </style>
