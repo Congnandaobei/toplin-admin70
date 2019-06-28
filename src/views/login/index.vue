@@ -27,6 +27,7 @@
             <el-button
             @click="handleSendCode"
             :disabled="!!codeTimer"
+            :loading="codeLoading"
             >{{ codeTimer ? `剩余${codeTimeSeconds}秒` : '获取验证码'}}</el-button>
           </el-col>
         </el-form-item>
@@ -35,7 +36,11 @@
           <span class="agree-text">我已阅读并同意<a href="#">用户协议</a>和<a href="#">隐私条款</a></span>
         </el-form-item>
         <el-form-item>
-          <el-button class="btn-login" type="primary" @click="handleLogin">登录</el-button>
+          <el-button
+          class='btn-login'
+          type='primary'
+          @click="handleLogin"
+          :loading="loginLoading">登录</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -44,6 +49,7 @@
 <script>
 import '@/vendor/gt' // 引入极验 javascript SDK文件,里面就是一些方法,通过window.initGeetest使用
 import { saveUser } from '@/utils/auth'// 按需加载，加载模块中非 export default 成员
+import initGeetest from '@/utils/init-geetest'
 const initCodeTimeSeconds = 10
 export default {
   name: 'AppLogin',
@@ -79,7 +85,9 @@ export default {
       },
       codeTimer: null,
       // 倒计时事件
-      codeTimeSeconds: initCodeTimeSeconds
+      codeTimeSeconds: initCodeTimeSeconds, // 倒计时时间
+      loginLoading: false, // 登录中 loading
+      codeLoading: false
     }
   },
   methods: {
@@ -94,28 +102,27 @@ export default {
         this.submitLogin()
       })
     },
-    submitLogin() {
-      this.$http({
-        method: 'POST',
-        url: ' /authorizations',
-        data: this.form
-      })
-        .then(res => {
-          // console.log(res.data);
-          const userInfo = res.data.data
-          // window.localStorage.setItem('user_info',JSON.stringify(userInfo))
-          saveUser(userInfo)
-          this.$message({
-            message: '恭喜你，这是一条成功消息',
-            type: 'success'
-          })
-          this.$router.push({
-            name: 'home'
-          })
+    async submitLogin() {
+      this.loginLoading = true
+      try {
+        const userInfo = await this.$http({
+          method: 'POST',
+          url: '/authorizations',
+          data: this.form
         })
-        .catch(e => {
-          this.$message.error('登录失败,手机号或验证码错误')
+        // window.localStorage.setItem('user_info',JSON.stringify(userInfo))
+        saveUser(userInfo)
+        this.$message({
+          message: '恭喜你，这是一条成功消息',
+          type: 'success'
         })
+        this.$router.push({
+          name: 'home'
+        })
+      } catch (err) {
+        this.$message.error('登录失败,手机号或验证码错误')
+      }
+      this.loginLoading = false
     },
     handleSendCode() {
       // 验证手机号是否有效
@@ -128,82 +135,86 @@ export default {
         this.showGeetest()
       })
     },
-    showGeetest() {
-      // 任何函数中的 function 函数内部的 this 指向 window
-      // 这里用对象解构赋值
-      const { mobile } = this.form
-      // 1.点击获取验证码，发送请求 获取人机验证码（极验 API1），获取用来初始化验证码的参数
-      this.$http({
+    async showGeetest() {
+      try {
+        this.codeLoading = true
+        // 任何函数中的 function 函数内部的 this 指向 window
+        // 这里用对象解构赋值
+        const { mobile } = this.form
+        // 1.点击获取验证码，发送请求 获取人机验证码（极验 API1），获取用来初始化验证码的参数
+        const data = await this.$http({
         // 请求方式也是APL里面的给的
-        method: 'GET',
-        // 这个是（极验API里面的在线地址）
-        url: `/captchas/${mobile}`
-      }).then(res => {
-        console.log(res.data)
+          method: 'GET',
+          // 这个是（极验API里面的在线地址）
+          url: `/captchas/${mobile}`
+        })
+        // console.log(res.data)
         // const { data } = res.data
-        const data = res.data.data
-        console.log(data)
-        window.initGeetest(
-          {
-            // 以下配置参数来自服务器 SDK也就是第一次的那些数据
-            gt: data.gt,
-            challenge: data.challenge,
-            offline: !data.success,
-            new_captcha: data.new_captcha,
-            product: 'bind' // 隐藏，直接弹出式
-          }, captchaObj => {
-            // console.log(captchaObj)
-            captchaObj.onReady(function() {
-              captchaObj.verify() // 弹出验证码的内容框
-              // 验证码raedy之后才能调用verify方法显示验证码
-            }).onSuccess(() => {
-              // 如果成功了
-              // 调用一个方法
-              // console.log(captchaObj.getValidate())// 得到以下数据，是下一个接口要的
-              // {geetest_challenge: "f2d6949ec81f108a56c30db7e30ddfa69h", geetest_validate: "a7e74c7e68cfabd0346c1a51621dea46", geetest_seccode: "a7e74c7e68cfabd0346c1a51621dea46|jordan"}
-              // geetest_challenge: "f2d6949ec81f108a56c30db7e30ddfa69h"
-              // geetest_seccode: "a7e74c7e68cfabd0346c1a51621dea46|jordan"
-              // geetest_validate: "a7e74c7e68cfabd0346c1a51621dea46"
-              // __proto__: Object
-              // your code
-              // 这个下面是得到数据然后给后端
-              // 这个是解构赋值,因为后端要的是challenge validate seccode所以我们把数据改名
-              const {
-                geetest_challenge: challenge,
-                geetest_seccode: seccode,
-                geetest_validate: validate } =
-              captchaObj.getValidate()
-              // 发送短信
-              this.$http({ // 另一个页面起的名字就是$.http
-                method: 'GET',
-                url: ` /sms/codes/${mobile}`,
-                params: {
-                  challenge,
-                  validate,
-                  seccode
-                }
-              }).then(res => {
-                console.log(res.data)
-                // 发送短信成功，开始倒计时
-                this.codeCountDown()
-              })
-            }).onError(function() {
-              // your code
+        // const data = res.data.data
+        // console.log(data)
+        const captchaObj = await initGeetest({
+        // 以下配置参数来自服务器 SDK也就是第一次的那些数据
+          gt: data.gt,
+          challenge: data.challenge,
+          offline: !data.success,
+          new_captcha: data.new_captcha,
+          product: 'bind' // 隐藏，直接弹出式
+        })
+        // console.log(captchaObj)
+        captchaObj.onReady(() => {
+          this.cadeLoading = false
+          captchaObj.verify() // 弹出验证码的内容框
+        // 验证码raedy之后才能调用verify方法显示验证码
+        }).onSuccess(async() => {
+        // 如果成功了
+        // 调用一个方法
+        // console.log(captchaObj.getValidate())// 得到以下数据，是下一个接口要的
+        // {geetest_challenge: "f2d6949ec81f108a56c30db7e30ddfa69h", geetest_validate: "a7e74c7e68cfabd0346c1a51621dea46", geetest_seccode: "a7e74c7e68cfabd0346c1a51621dea46|jordan"}
+        // geetest_challenge: "f2d6949ec81f108a56c30db7e30ddfa69h"
+        // geetest_seccode: "a7e74c7e68cfabd0346c1a51621dea46|jordan"
+        // geetest_validate: "a7e74c7e68cfabd0346c1a51621dea46"
+        // __proto__: Object
+        // your code
+        // 这个下面是得到数据然后给后端
+        // 这个是解构赋值,因为后端要的是challenge validate seccode所以我们把数据改名
+          try {
+            const {
+              geetest_challenge: challenge,
+              geetest_seccode: seccode,
+              geetest_validate: validate } =
+            captchaObj.getValidate()
+            // 发送短信
+            await this.$http({ // 另一个页面起的名字就是$.http
+              method: 'GET',
+              url: ` /sms/codes/${mobile}`,
+              params: {
+                challenge,
+                validate,
+                seccode
+              }
             })
-            // 在这里注册：“发送验证码” 按钮的点击事件，然后验证用户是否输入手机号以及手机号是否正确
-            // 如果没有问题 cptchObj.verify
+            // 发送短信成功，开始倒计时
+            this.codeCountDown()
+          } catch (err) {
+            this.$message.error('获取验证码失败')
+            this.codeLoading = false
           }
-        )
-        // console.log(res.data)// 输入一个手机号，可以得到以下数据,这些数据给极验用的
-        // {message: "OK",…}
-        // data: {success: 1, gt: "f00de9ed073bd781c94509932a309159", challenge: "92825d1ceba6748cb7fcbf66c78fe4c1",…}
-        // challenge: "92825d1ceba6748cb7fcbf66c78fe4c1"
-        // gt: "f00de9ed073bd781c94509932a309159"
-        // new_captcha: true
-        // success: 1
-        // message: "OK"
-      })
+        })
+      } catch (err) {
+        this.$message.error('获取验证码失败')
+        this.codeLoading = false
+      }
     },
+    // 在这里注册：“发送验证码” 按钮的点击事件，然后验证用户是否输入手机号以及手机号是否正确
+    // 如果没有问题 cptchObj.verify
+    // console.log(res.data)// 输入一个手机号，可以得到以下数据,这些数据给极验用的
+    // {message: "OK",…}
+    // data: {success: 1, gt: "f00de9ed073bd781c94509932a309159", challenge: "92825d1ceba6748cb7fcbf66c78fe4c1",…}
+    // challenge: "92825d1ceba6748cb7fcbf66c78fe4c1"
+    // gt: "f00de9ed073bd781c94509932a309159"
+    // new_captcha: true
+    // success: 1
+    // message: "OK"
     /**
      * 验证码倒计时
      */
